@@ -55,8 +55,7 @@ export default function CVUploader({ onCVParsed }) {
         {
           method: "POST",
           headers: {
-            Authorization:
-              "Bearer sk-proj-1nOaeXQKACWga2nbnIQrT3BlbkFJWA71WZLISgZUa3zTuFGh",
+            Authorization: `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
