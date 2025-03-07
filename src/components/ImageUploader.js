@@ -1,132 +1,178 @@
-import { useState } from "react";
-import { Upload, X, CheckCircle2, Wand2 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import React, { useState, useRef } from "react";
+import { Upload, X, Image as ImageIcon, Wand2 } from "lucide-react";
 
 export default function ImageUploader({
   config,
-  onImageUploaded,
   currentImages = [],
+  onImageUploaded,
   onImageRemoved,
   onDescriptionChange,
   onGenerateDescription,
 }) {
-  const [isDragging, setIsDragging] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [error, setError] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
-  const handleFile = async (file) => {
-    setUploadProgress(0);
-    const interval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 90) {
-          clearInterval(interval);
-          return 90;
-        }
-        return prev + 10;
-      });
-    }, 100);
+  const validateFile = (file) => {
+    if (!file) return "No file selected";
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      clearInterval(interval);
-      setUploadProgress(100);
-      onImageUploaded(reader.result);
-      setTimeout(() => setUploadProgress(0), 1000);
-    };
-    reader.readAsDataURL(file);
+    // Check file size (in MB)
+    const fileSize = file.size / (1024 * 1024);
+    if (fileSize > (config.maxSize || 5)) {
+      return `File size must be less than ${config.maxSize || 5}MB`;
+    }
+
+    // Check file type
+    const acceptedFormats = config.acceptedFormats || [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".gif",
+    ];
+    const fileExtension = "." + file.name.split(".").pop().toLowerCase();
+    if (!acceptedFormats.includes(fileExtension)) {
+      return `Only ${acceptedFormats.join(", ")} files are allowed`;
+    }
+
+    return null;
+  };
+
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    const files = e.dataTransfer.files;
+    await handleFiles(files);
+  };
+
+  const handleFileInput = async (e) => {
+    const files = e.target.files;
+    await handleFiles(files);
+  };
+
+  const handleFiles = async (files) => {
+    for (const file of files) {
+      const validationError = validateFile(file);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+
+      setUploading(true);
+      setError(null);
+
+      try {
+        // Create a FileReader to get base64 for preview
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const base64 = e.target.result;
+
+          // In a real app, you'd upload to a server here
+          // For now, we'll use the base64 as the "uploaded" URL
+          onImageUploaded(base64);
+        };
+        reader.readAsDataURL(file);
+      } catch (error) {
+        setError("Failed to upload image. Please try again.");
+        console.error("Upload error:", error);
+      } finally {
+        setUploading(false);
+      }
+    }
   };
 
   return (
     <div className="space-y-4">
       <div
-        className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors
-          ${isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300"}`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setIsDragging(true);
-        }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setIsDragging(false);
-          const file = e.dataTransfer.files[0];
-          if (file) handleFile(file);
-        }}
+        className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
+          dragActive ? "border-blue-500 bg-blue-50" : "border-gray-300"
+        }`}
+        onDragEnter={handleDrag}
+        onDragLeave={handleDrag}
+        onDragOver={handleDrag}
+        onDrop={handleDrop}
       >
         <input
+          ref={fileInputRef}
           type="file"
-          accept="image/*"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) handleFile(file);
-          }}
+          multiple={config.type === "gallery"}
+          accept={config.acceptedFormats?.join(",") || "image/*"}
+          onChange={handleFileInput}
           className="hidden"
-          id="image-upload"
         />
-        <label htmlFor="image-upload" className="cursor-pointer">
-          <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-          <p className="text-gray-600 mb-2">
-            Drag and drop your image here, or click to browse
-          </p>
-        </label>
 
-        {uploadProgress > 0 && (
-          <div className="mt-4">
-            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-blue-500 transition-all duration-300"
-                style={{ width: `${uploadProgress}%` }}
-              />
-            </div>
-            {uploadProgress === 100 && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex items-center gap-2 text-green-600 mt-2 justify-center"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Upload complete!</span>
-              </motion.div>
-            )}
+        <div className="flex flex-col items-center gap-3">
+          <Upload className="w-10 h-10 text-gray-400" />
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="text-blue-500 hover:text-blue-600 font-medium"
+            >
+              Click to upload
+            </button>
+            <span className="text-gray-500"> or drag and drop</span>
           </div>
-        )}
+          {config.recommendedDimensions && (
+            <p className="text-sm text-gray-500">
+              Recommended: {config.recommendedDimensions}
+            </p>
+          )}
+          <p className="text-sm text-gray-500">
+            Max size: {config.maxSize || 5}MB
+          </p>
+          {error && <p className="text-sm text-red-500">{error}</p>}
+        </div>
       </div>
 
+      {/* Image Preview Grid */}
       {currentImages.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
           {currentImages.map((image, index) => (
-            <div key={index} className="space-y-3">
-              <div className="relative group">
-                <img
-                  src={image.url}
-                  alt={`Work sample ${index + 1}`}
-                  className="w-full h-48 object-cover rounded-lg"
-                />
+            <div key={index} className="relative group">
+              <img
+                src={image.url}
+                alt={image.description || `Image ${index + 1}`}
+                className="w-full h-40 object-cover rounded-lg"
+              />
+              <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
                 <button
                   onClick={() => onImageRemoved(index)}
-                  className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600"
                 >
-                  <X className="w-4 h-4" />
+                  <X size={16} />
                 </button>
               </div>
-
-              <div className="space-y-2">
-                <textarea
-                  placeholder="Describe this image..."
-                  value={image.description || ""}
-                  onChange={(e) => onDescriptionChange(index, e.target.value)}
-                  className="w-full p-2 border rounded-md text-sm resize-none"
-                  rows={3}
-                />
-                <button
-                  onClick={() => onGenerateDescription(index)}
-                  disabled={isGenerating}
-                  className="flex items-center gap-2 px-3 py-1 text-sm bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 transition-colors"
-                >
-                  <Wand2 className="w-4 h-4" />
-                  {isGenerating ? "Generating..." : "Generate Description"}
-                </button>
-              </div>
+              {config.type === "gallery" && (
+                <div className="mt-2">
+                  <input
+                    type="text"
+                    value={image.description || ""}
+                    onChange={(e) => onDescriptionChange(index, e.target.value)}
+                    placeholder="Add description..."
+                    className="w-full p-2 text-sm border rounded"
+                  />
+                  <button
+                    onClick={() => onGenerateDescription(index)}
+                    className="mt-1 text-sm text-blue-500 hover:text-blue-600 flex items-center gap-1"
+                  >
+                    <Wand2 size={12} />
+                    Generate description
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

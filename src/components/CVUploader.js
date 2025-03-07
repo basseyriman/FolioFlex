@@ -8,7 +8,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.j
 
 export default function CVUploader({ onCVParsed }) {
   const [isDragging, setIsDragging] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState(null);
 
   const extractTextFromPDF = async (file) => {
     const arrayBuffer = await file.arrayBuffer();
@@ -30,58 +31,10 @@ export default function CVUploader({ onCVParsed }) {
     return result.value;
   };
 
-  const parseCV = async (text) => {
-    try {
-      const response = await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-3.5-turbo",
-            messages: [
-              {
-                role: "system",
-                content: `You are a CV parser. Extract the following information in JSON format:
-                - name (full name)
-                - title (professional title/role)
-                - email
-                - phone
-                - linkedin (URL if present)
-                - github (URL if present)
-                - website (URL if present)
-                - summary (brief professional summary)
-                - skills (array of skills)
-                - experience (array of objects with: title, company, startDate, endDate, description)
-                - education (array of objects with: degree, institution, year, details)
-                Return only the JSON object, no additional text.`,
-              },
-              {
-                role: "user",
-                content: `Parse this CV and extract the details: ${text}`,
-              },
-            ],
-            temperature: 0.3,
-          }),
-        }
-      );
+  const parseCV = async (file) => {
+    setIsUploading(true);
+    setError(null);
 
-      const data = await response.json();
-      if (data.choices && data.choices[0]) {
-        const parsedCV = JSON.parse(data.choices[0].message.content);
-        onCVParsed(parsedCV);
-      }
-    } catch (error) {
-      console.error("Error parsing CV:", error);
-      throw new Error("Failed to parse CV");
-    }
-  };
-
-  const handleFile = async (file) => {
-    setIsLoading(true);
     try {
       let text = "";
       if (file.type === "application/pdf") {
@@ -92,29 +45,79 @@ export default function CVUploader({ onCVParsed }) {
       ) {
         text = await extractTextFromDOCX(file);
       } else {
-        throw new Error("Unsupported file format");
+        throw new Error(
+          "Unsupported file format. Please upload a PDF or DOCX file."
+        );
       }
-      await parseCV(text);
-    } catch (error) {
-      console.error("Error processing file:", error);
+
+      const response = await fetch(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization:
+              "Bearer sk-proj-1nOaeXQKACWga2nbnIQrT3BlbkFJWA71WZLISgZUa3zTuFGh",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "gpt-3.5-turbo",
+            messages: [
+              {
+                role: "system",
+                content: `You are a CV parser. Extract the following information from the CV in a structured JSON format:
+              {
+                "name": "Full Name",
+                "title": "Professional Title",
+                "summary": "Brief professional summary",
+                "experience": [
+                  {
+                    "company": "Company Name",
+                    "title": "Job Title",
+                    "startDate": "Start Date",
+                    "endDate": "End Date",
+                    "description": "Job Description"
+                  }
+                ],
+                "education": [
+                  {
+                    "institution": "Institution Name",
+                    "degree": "Degree Name",
+                    "year": "Graduation Year",
+                    "details": "Additional Details"
+                  }
+                ],
+                "skills": ["Skill 1", "Skill 2", "Skill 3"],
+                "contact": {
+                  "email": "Email",
+                  "phone": "Phone Number",
+                  "linkedin": "LinkedIn URL",
+                  "github": "GitHub URL",
+                  "website": "Personal Website"
+                }
+              }`,
+              },
+              {
+                role: "user",
+                content: `Parse this CV and extract the information in the specified JSON format:\n\n${text}`,
+              },
+            ],
+            temperature: 0.3,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to parse CV. Please try again.");
+      }
+
+      const data = await response.json();
+      const parsedCV = JSON.parse(data.choices[0].message.content);
+      onCVParsed(parsedCV);
+    } catch (err) {
+      console.error("Error parsing CV:", err);
+      setError(err.message || "Failed to parse CV. Please try again.");
     } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleDrop = async (e) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) {
-      await handleFile(file);
-    }
-  };
-
-  const handleFileInput = async (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      await handleFile(file);
+      setIsUploading(false);
     }
   };
 
@@ -147,9 +150,14 @@ export default function CVUploader({ onCVParsed }) {
           setIsDragging(true);
         }}
         onDragLeave={() => setIsDragging(false)}
-        onDrop={handleDrop}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDragging(false);
+          const file = e.dataTransfer.files[0];
+          if (file) parseCV(file);
+        }}
       >
-        {isLoading ? (
+        {isUploading ? (
           <div className="flex flex-col items-center gap-4">
             <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
             <p className="text-gray-600">Processing your CV...</p>
@@ -163,7 +171,10 @@ export default function CVUploader({ onCVParsed }) {
             <input
               type="file"
               accept=".pdf,.docx"
-              onChange={handleFileInput}
+              onChange={(e) => {
+                const file = e.target.files[0];
+                if (file) parseCV(file);
+              }}
               className="hidden"
               id="cv-upload"
             />
@@ -176,6 +187,16 @@ export default function CVUploader({ onCVParsed }) {
           </>
         )}
       </motion.div>
+
+      {error && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="mt-4 p-4 bg-red-50 text-red-600 rounded-md"
+        >
+          {error}
+        </motion.div>
+      )}
     </div>
   );
 }
